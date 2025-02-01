@@ -2,6 +2,9 @@ from flask import Flask, render_template, request, jsonify, session
 from flask_mysqldb import MySQL
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
+from flask_mail import Mail, Message
+from abc import ABC, abstractmethod
+import random
 import mysql.connector
 import os
 import base64
@@ -20,8 +23,20 @@ app.config['MYSQL_DB'] = 'ANUNCIAUFC' #FAÇA O BANCO DE DADOS COM ESSE NOME
 app.config['CORS_HEADERS'] = 'Content-Type'
 app.config['SECRET_KEY'] = 'chave'
 
+# Configuração do Flask-Mail
+app.config['MAIL_SERVER'] = 'smtp.gmail.com' 
+app.config['MAIL_PORT'] = 465
+app.config['MAIL_USE_TLS'] = False
+app.config['MAIL_USE_SSL'] = True
+app.config['MAIL_USERNAME'] = 'anunciaufc@gmail.com'  # Insira seu e-mail
+app.config['MAIL_PASSWORD'] = 'msgn mgxl itmm kghd'           # Insira sua senha ou app password
+app.config['MAIL_DEFAULT_SENDER'] = 'anunciaufc@gmail.com'
+
 mysql = MySQL(app)
 bcrypt = Bcrypt(app)
+
+mail = Mail(app)
+temp_codes = {}
 
 cors = CORS(app, supports_credentials=True, origins='http://localhost:5173')
 
@@ -168,7 +183,47 @@ def cadastro():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/confirmaemail', methods=['POST'])
+def send_confirmation_email():
+    data = request.get_json()
+    email = data.get('email')  # E-mail fornecido pelo usuário
+
+    # Gere um código de verificação (exemplo: 6 dígitos)
+    confirmation_code = random.randint(100000, 999999)
+    temp_codes[email] = confirmation_code
+
+    print(confirmation_code)
+
+    # Enviar o e-mail
+    try:
+        msg = Message(
+            'Confirmação de Cadastro',
+            recipients=[email]  # Lista de destinatários
+        )
+        msg.body = f"Seu código de verificação é: {confirmation_code}"
+        mail.send(msg)
+        
+        return jsonify({'message': 'E-mail enviado com sucesso!', 'code': confirmation_code}), 200
+
+    except Exception as e:
+        return jsonify({'message': 'Erro ao enviar o e-mail.', 'error': str(e)}), 500
     
+
+@app.route('/verifyemail', methods=['POST'])
+def verifyemail():
+    data = request.get_json()
+    email = data.get('email')
+    code = data.get('code')
+
+    if temp_codes[email] == int(code):
+        del temp_codes[email]
+        return jsonify({'message':'Code validated successfully.'}), 200
+    else:
+        return jsonify({'message':'Invalid code.'}), 400
+
+ 
 @app.route('/login', methods=['POST'])
 def login():
     try:
@@ -205,3 +260,4 @@ def login():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
