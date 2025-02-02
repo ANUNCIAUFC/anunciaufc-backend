@@ -2,40 +2,27 @@ from flask import Flask, render_template, request, jsonify, session
 from flask_mysqldb import MySQL
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
-from flask_mail import Mail, Message
+from config import Config
+from database import Database
+from mail import MailService
 from abc import ABC, abstractmethod
 import random
 import mysql.connector
-import os
 import base64
 import jwt  
-import os
 import datetime
+import os
 
 app = Flask (__name__)
-app.secret_key = os.urandom(24)  #Gera uma chave secreta aleatória
-JWT_SECRET_KEY = os.urandom(32).hex() #chave secreta JWT
+app.config.from_object(Config)
 
-app.config['MYSQL_HOST'] = '' #LOCALHOST 
-app.config['MYSQL_USER'] = 'root'
-app.config['MYSQL_PASSWORD'] = '' #SENHA 
-app.config['MYSQL_DB'] = 'ANUNCIAUFC' #FAÇA O BANCO DE DADOS COM ESSE NOME
-app.config['CORS_HEADERS'] = 'Content-Type'
-app.config['SECRET_KEY'] = 'chave'
+SECRET_KEY = os.urandom(24)
+JWT_SECRET_KEY = os.urandom(32).hex()
 
-# Configuração do Flask-Mail
-app.config['MAIL_SERVER'] = 'smtp.gmail.com' 
-app.config['MAIL_PORT'] = 465
-app.config['MAIL_USE_TLS'] = False
-app.config['MAIL_USE_SSL'] = True
-app.config['MAIL_USERNAME'] = 'anunciaufc@gmail.com'  # Insira seu e-mail
-app.config['MAIL_PASSWORD'] = 'msgn mgxl itmm kghd'           # Insira sua senha ou app password
-app.config['MAIL_DEFAULT_SENDER'] = 'anunciaufc@gmail.com'
-
-mysql = MySQL(app)
+db = Database(app)
 bcrypt = Bcrypt(app)
+mail = MailService(app)
 
-mail = Mail(app)
 temp_codes = {}
 
 cors = CORS(app, supports_credentials=True, origins='http://localhost:5173')
@@ -48,6 +35,19 @@ def options():
     response.headers.add('Access-Control-Allow-Credentials', 'true')
     response.status_code = 200
     return response
+
+class CodeGenerator:
+    @staticmethod
+    def generate_code():
+        return random.randint(100000, 999999)
+    
+class CodeVerifier:
+    @staticmethod
+    def verify_code(email, code):
+        if email in temp_codes and temp_codes[email] == int(code):
+            del temp_codes[email]  
+            return True
+        return False
 
 class USERS:
     def __init__(self, name, telephone, email, cpf, campus, gender):
@@ -90,7 +90,6 @@ GET /?category=eletronicos&az=true
 @app.route('/', methods=['GET'])
 def home():
     try:
-        cursor = mysql.connection.cursor()
         
         category = request.args.get('category')
         campus = request.args.get('campus')
@@ -98,7 +97,7 @@ def home():
         order_az = request.args.get('az') #mude caso não seja assim o nome
         order_price = request.args.get('price')
        
-        query = "SELECT * FROM Announcement"
+        query = "SELECT * FROM ANNOUNCEMENT"
         
         params = []
         conditions = [] 
@@ -125,9 +124,7 @@ def home():
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
 
-        cursor.execute(query, tuple(params))
-        announcements = cursor.fetchall()
-        cursor.close()
+        announcements = db.query(query)
         
         return jsonify([
         {
@@ -155,7 +152,6 @@ def cadastro():
             return response
 
         data = request.get_json()
-        cursor = mysql.connection.cursor()
 
         name = data['name']
         password = bcrypt.generate_password_hash(data['password'])
@@ -165,19 +161,15 @@ def cadastro():
         campus = data['campus']
         gender = data['gender']
 
-        cursor.execute("SELECT email FROM USERS WHERE email = %s", (email,))
-        user_existe = cursor.fetchone()
+        user_existe = db.query("SELECT email FROM USERS WHERE email = %s", (email,))
 
         if user_existe:
-            cursor.close()
             return jsonify({'message': "E-mail existente, digite outro!", 'code': "EMAIL_ALREADY_EXISTS"}), 409
 
-        cursor.execute("""
+        db.execute("""
             INSERT INTO USERS (name, password, telephone, email, cpf, campus, gender) 
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (name, password, telephone, email, cpf, campus, gender))
-        mysql.connection.commit()
-        cursor.close()
 
         return jsonify({'message': 'Registrado com sucesso'}), 200
 
@@ -190,20 +182,13 @@ def send_confirmation_email():
     data = request.get_json()
     email = data.get('email')  # E-mail fornecido pelo usuário
 
-    # Gere um código de verificação (exemplo: 6 dígitos)
-    confirmation_code = random.randint(100000, 999999)
+    confirmation_code = CodeGenerator.generate_code()
     temp_codes[email] = confirmation_code
-
-    print(confirmation_code)
 
     # Enviar o e-mail
     try:
-        msg = Message(
-            'Confirmação de Cadastro',
-            recipients=[email]  # Lista de destinatários
-        )
-        msg.body = f"Seu código de verificação é: {confirmation_code}"
-        mail.send(msg)
+        
+        mail.sendmail(email, confirmation_code)
         
         return jsonify({'message': 'E-mail enviado com sucesso!', 'code': confirmation_code}), 200
 
@@ -217,8 +202,7 @@ def verifyemail():
     email = data.get('email')
     code = data.get('code')
 
-    if temp_codes[email] == int(code):
-        del temp_codes[email]
+    if CodeVerifier.verify_code(email, int(code)):
         return jsonify({'message':'Code validated successfully.'}), 200
     else:
         return jsonify({'message':'Invalid code.'}), 400
@@ -234,11 +218,8 @@ def login():
         if not email or not password:
             return jsonify({'message': 'Email e senha são obrigatórios'}), 400
 
-        cursor = mysql.connection.cursor()
-        cursor.execute("SELECT * FROM USERS WHERE email = %s", (email,))
-        user = cursor.fetchone()
-        cursor.close()
-
+        user = db.query("SELECT * FROM USERS WHERE email = %s", (email,))
+        
         if not user:
             return jsonify({'message': 'Usuário não encontrado'}), 404
         if not bcrypt.check_password_hash(user[2], password):
