@@ -133,7 +133,7 @@ def home():
         {
             'title': announcement[2],
             'campus': announcement[3],
-            'price': announcement[4],
+            'price': announcement[5],
             'images': announcement[8], #por enquanto é null
             'date': announcement[9]
         } for announcement in announcements
