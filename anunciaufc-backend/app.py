@@ -190,7 +190,7 @@ def send_confirmation_email():
         
         mail.sendmail(email, confirmation_code)
         
-        return jsonify({'message': 'E-mail enviado com sucesso!', 'code': confirmation_code}), 200
+        return jsonify({'message': 'E-mail enviado com sucesso!'}), 200
 
     except Exception as e:
         return jsonify({'message': 'Erro ao enviar o e-mail.', 'error': str(e)}), 500
@@ -218,7 +218,7 @@ def login():
         if not email or not password:
             return jsonify({'message': 'Email e senha são obrigatórios'}), 400
 
-        user = db.query("SELECT * FROM USERS WHERE email = %s", (email,))
+        user = db.query("SELECT * FROM USERS WHERE email = %s", (email,))[0]
         
         if not user:
             return jsonify({'message': 'Usuário não encontrado'}), 404
@@ -237,7 +237,7 @@ def login():
 
     except Exception as e:
         print("Error:", e)
-        return jsonify({'error': 'Internal Server Error'}), 500
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
