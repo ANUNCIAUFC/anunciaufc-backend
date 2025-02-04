@@ -82,11 +82,7 @@ def verify_jwt_token(token):
     except jwt.InvalidTokenError:
         return None #token inválido
 
-"""
-Caso  tenha filtros e ordenação, envie assim:
-Exemplo:
-GET /?category=eletronicos&az=true
-"""
+
 @app.route('/', methods=['GET'])
 def home():
     try:
@@ -138,6 +134,7 @@ def home():
         
     except Exception as e:
         return jsonify ({'error': str(e)}), 500
+
 
 @app.route('/register', methods=['POST', 'OPTIONS'])
 def cadastro():
@@ -238,6 +235,27 @@ def login():
     except Exception as e:
         print("Error:", e)
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/fargotpassword', methods=['PUT'])
+def fargotpassword():
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        password = data.get('password')
+        
+        db.execute("""
+            UPDATE USERS SET password = %s WHERE email = %s
+        """, (password, email))
+    
+
+        return jsonify({'message': 'Senha modificada com sucesso'}), 200
+
+    except Exception as e:
+        print("Error:", e)
+        return jsonify({'error': str(e)}), 500
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
