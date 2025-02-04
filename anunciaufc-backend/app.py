@@ -220,6 +220,7 @@ def login():
             return jsonify({'message': 'Email e senha são obrigatórios'}), 400
 
         user = db.query("SELECT * FROM USERS WHERE email = %s", (email,))[0]
+        print (user[2])
         
         if not user:
             return jsonify({'message': 'Usuário não encontrado'}), 404
@@ -241,12 +242,12 @@ def login():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/fargotpassword', methods=['PUT'])
+@app.route('/forgotpassword', methods=['PUT'])
 def fargotpassword():
     try:
         data = request.get_json()
         email = data.get('email')
-        password = data.get('password')
+        password = bcrypt.generate_password_hash(data.get('password'))
         
         db.execute("""
             UPDATE USERS SET password = %s WHERE email = %s
