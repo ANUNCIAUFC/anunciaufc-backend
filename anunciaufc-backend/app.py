@@ -16,6 +16,10 @@ import os
 app = Flask (__name__)
 app.config.from_object(Config)
 
+app.config['MAIL_USERNAME'] = "anunciaufc@gmail.com"
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD', '')   # Use a senha gerada pelo Google
+
+
 SECRET_KEY = os.urandom(24)
 JWT_SECRET_KEY = os.urandom(32).hex()
 
@@ -128,7 +132,7 @@ def home():
         
         return jsonify([
         {
-            'title': announcement[2],
+            'description': announcement[7],
             'campus': announcement[3],
             'price': announcement[5],
             'images': announcement[8], #por enquanto é null

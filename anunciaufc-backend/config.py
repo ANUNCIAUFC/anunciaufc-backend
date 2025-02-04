@@ -2,7 +2,6 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()  # Carrega o arquivo .env por padrão
-load_dotenv(dotenv_path='secret.env')
 
 class Config:
     SECRET_KEY = os.urandom(24)
