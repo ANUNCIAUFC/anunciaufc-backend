@@ -87,44 +87,11 @@ def verify_jwt_token(token):
         return None #token inválido
 
 
-@app.route('/', methods=['GET'])
+@app.route('/home', methods=['GET'])
 def home():
     try:
-        
-        category = request.args.get('category')
-        campus = request.args.get('campus')
-        state = request.args.get('state')
-        order_az = request.args.get('az') #mude caso não seja assim o nome
-        order_price = request.args.get('price')
-       
-        query = "SELECT * FROM ANNOUNCEMENT"
-        
-        params = []
-        conditions = [] 
-        if category:
-            conditions.append("category = %s")
-            params.append(category)
-        if campus:
-            conditions.append("campus = %s")
-            params.append(campus)
-        if state:
-            conditions.append("state = %s")
-            params.append(state) 
-        if order_az and order_az.lower() == 'true':
-            query += " ORDER BY title ASC"
-        
-        
-        if order_price and order_price.lower() == 'true':
-            if 'ORDER BY' in query:
-                query += ", price ASC"
-            else:
-                query += " ORDER BY price ASC"
-        
-       
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-
-        announcements = db.query(query)
+        quant = 8  
+        announcements = db.query("SELECT * FROM ANNOUNCEMENT ORDER BY RAND() LIMIT %s", (quant,))
         
         return jsonify([
         {
@@ -138,7 +105,7 @@ def home():
         
     except Exception as e:
         return jsonify ({'error': str(e)}), 500
-
+    
 
 @app.route('/register', methods=['POST', 'OPTIONS'])
 def cadastro():
