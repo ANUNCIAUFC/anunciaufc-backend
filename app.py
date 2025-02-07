@@ -107,6 +107,68 @@ def home():
         return jsonify ({'error': str(e)}), 500
     
 
+
+@app.route('/products', methods = ['GET'])
+def products():
+    try:
+        category = request.args.get('category')
+        campus = request.args.get('campus')
+        state = request.args.get('state')
+        order_az = request.args.get('order_az')
+        order_price = request.args.get('order_price')
+
+        query = "SELECT * FROM ANNOUNCEMENT WHERE 1=1"
+        params = []
+
+        if category:
+            query += " AND category = %s"
+            params.append(category)
+        if state:
+            query += " AND state = %s"
+            params.append(state)
+        if campus:
+            query += " AND campus = %s"
+            params.append(campus)
+
+
+        order_clauses = []
+
+        if order_az and order_az.lower() == 'true':
+            order_clauses.append(" title ASC")
+
+        if order_price and order_price.lower() == 'true':
+            order_clauses.append(" price + 0 ASC")
+        
+        if order_clauses:
+            query += " ORDER BY " + " , ".join(order_clauses)
+
+        
+        productsbd = db.query(query, params)
+
+        products_list = [
+        {
+            "id": p[0],
+            "userId": p[1],
+            "title": p[2],
+            "campus": p[3],
+            "category": p[4],
+            "price": p[5],
+            "state": p[6],
+            "description": p[7],
+            "images": p[8],
+            "date": p[9]
+        }
+        for p in productsbd
+    ]
+
+        return jsonify(products_list), 200
+
+
+    except Exception as e:
+        print("Error:", e)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/register', methods=['POST', 'OPTIONS'])
 def cadastro():
     try:
@@ -148,16 +210,14 @@ def cadastro():
 @app.route('/confirmaemail', methods=['POST'])
 def send_confirmation_email():
     data = request.get_json()
-    email = data.get('email')  # E-mail fornecido pelo usuário
+    email = data.get('email')
 
     confirmation_code = CodeGenerator.generate_code()
     temp_codes[email] = confirmation_code
 
-    # Enviar o e-mail
     try:
         
         mail.sendmail(email, confirmation_code)
-        
         return jsonify({'message': 'E-mail enviado com sucesso!'}), 200
 
     except Exception as e:
