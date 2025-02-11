@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, json, render_template, request, jsonify, session
 from flask_mysqldb import MySQL
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
@@ -298,12 +298,13 @@ def criar_anuncio():
     if not payload:
         return jsonify({'error': 'Token expirado ou inválido'}), 404
     
-    data = request.get_json() 
+    data = json.loads(request.form['data']) 
     images = request.files.getlist("images")
     
     if len(images) > 4:
         return jsonify({'error': 'Máximo de 4 imagens permitidas'}), 400
     
+    image_bytes = [img.read() for img in images] + [None] * (4 - len(images))
     
     title = data['title']
     category = data['category']
@@ -312,10 +313,6 @@ def criar_anuncio():
     stateProduct = data['stateProduct']
     description = data['description']
     validation = 1 #Quando a parte do adm estiver implementado deve inicializar em 0
-    
-    image_bytes = [None] * 4  
-    for i in range(len(images)):  
-        image_bytes[i] = base64.b64decode(images[i])
     
     try:
         email = session['email']
@@ -328,7 +325,7 @@ def criar_anuncio():
         ''', (idUser, title, category, campus, value, stateProduct, description, image_bytes[0], image_bytes[1], image_bytes[2], image_bytes[3], validation))
         
         
-        return jsonify({'message': 'Anúncio criado com sucesso!'}), 201
+        return jsonify({'message': 'Anúncio criado com sucesso!'}), 200
     
     except Exception as e:
         print("Error:", e)
@@ -336,7 +333,7 @@ def criar_anuncio():
 
 
 @app.route('/getannouncement', methods=['GET'])
-def get_announcement(announcement_id):
+def get_announcement():
     
     id = request.args.get('id')
     
