@@ -91,10 +91,11 @@ def verify_jwt_token(token):
 def home():
     try:
         quant = 8  
-        announcements = db.query("SELECT * FROM ANNOUNCEMENT ORDER BY RAND() LIMIT %s", (quant,))
+        announcements = db.query("SELECT * FROM ANNOUNCEMENT WHERE validation = 1 ORDER BY RAND() LIMIT %s", (quant,))
         
         return jsonify([
         {
+            'id': announcement[0],
             'description': announcement[7],
             'campus': announcement[3],
             'price': announcement[5],
@@ -106,7 +107,6 @@ def home():
     except Exception as e:
         return jsonify ({'error': str(e)}), 500
     
-
 
 @app.route('/products', methods = ['GET'])
 def products():
@@ -247,7 +247,6 @@ def login():
             return jsonify({'message': 'Email e senha são obrigatórios'}), 400
 
         user = db.query("SELECT * FROM USERS WHERE email = %s", (email,))[0]
-        print (user[2])
         
         if not user:
             return jsonify({'message': 'Usuário não encontrado'}), 404
@@ -286,7 +285,86 @@ def fargotpassword():
     except Exception as e:
         print("Error:", e)
         return jsonify({'error': str(e)}), 500
+    
+@app.route('/createannouncement', methods=['POST'])
+def criar_anuncio():
+    if 'email' not in session:
+        return jsonify({'error': 'Usuário não autenticado'}), 401
+    
+    token = request.headers.get('Authorization')
+    
+    payload = verify_jwt_token(token)
+        
+    if not payload:
+        return jsonify({'error': 'Token expirado ou inválido'}), 404
+    
+    data = request.get_json() 
+    images = request.files.getlist("images")
+    
+    if len(images) > 4:
+        return jsonify({'error': 'Máximo de 4 imagens permitidas'}), 400
+    
+    
+    title = data['title']
+    category = data['category']
+    campus = data['campus']
+    value = data['value']
+    stateProduct = data['stateProduct']
+    description = data['description']
+    validation = 1 #Quando a parte do adm estiver implementado deve inicializar em 0
+    
+    image_bytes = [None] * 4  
+    for i in range(len(images)):  
+        image_bytes[i] = base64.b64decode(images[i])
+    
+    try:
+        email = session['email']
+        
+        idUser = db.query('SELECT * FROM USERS WHERE email = %s', (email,))[0][0]
+        
+        db.execute(''' 
+            INSERT INTO ANNOUNCEMENT(userId, title, category, campus, price, state, description, image1, image2, image3, image4, validation)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (idUser, title, category, campus, value, stateProduct, description, image_bytes[0], image_bytes[1], image_bytes[2], image_bytes[3], validation))
+        
+        
+        return jsonify({'message': 'Anúncio criado com sucesso!'}), 201
+    
+    except Exception as e:
+        print("Error:", e)
+        return jsonify({'error': str(e)}), 500
 
+
+@app.route('/getannouncement', methods=['GET'])
+def get_announcement(announcement_id):
+    
+    id = request.args.get('id')
+    
+    try:
+        query = "SELECT title, category, campus, price, state, description, image1, image2, image3, image4 FROM ANNOUNCEMENT WHERE id = %s"
+        anuncio = db.query(query, (id,))
+
+        if not anuncio:
+            return jsonify({'error': 'Anúncio não encontrado'}), 404
+
+        # Converter imagens binárias para base64 para facilitar a exibição no front-end
+        def convert_image(image_data):
+            return None if image_data is None else f"data:image/jpeg;base64,{image_data.hex()}"
+
+        images = [convert_image(anuncio[f'image{i}']) for i in range(1, 5)]
+        
+        return jsonify({
+            'title': anuncio['title'],
+            'category': anuncio['category'],
+            'campus': anuncio['campus'],
+            'price': anuncio['price'],
+            'state': anuncio['state'],
+            'description': anuncio['description'],
+            'images': images
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
