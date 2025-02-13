@@ -6,7 +6,7 @@ app = Flask(__name__)
 # Configurações do banco de dados
 app.config['MYSQL_HOST'] = "localhost" #localhost
 app.config['MYSQL_USER'] = "root"
-app.config['MYSQL_PASSWORD'] = "" # SENHA 
+app.config['MYSQL_PASSWORD'] = "root" # SENHA 
 app.config['MYSQL_DB'] = "ANUNCIAUFC"  
 
 db = Database(app)
@@ -36,7 +36,7 @@ def create_tables():
                 campus VARCHAR(100),
                 category VARCHAR(50),
                 price VARCHAR(20),
-                state ENUM('new', 'used') DEFAULT 'new',
+                state ENUM('novo', 'usado') DEFAULT 'novo',
                 description VARCHAR(2028),
                 image1 LONGBLOB,
                 image2 LONGBLOB,

@@ -11,7 +11,7 @@ class Config:
     #MYSQL CONFIG
     MYSQL_HOST = 'localhost'
     MYSQL_USER = 'root'
-    MYSQL_PASSWORD = '1712'
+    MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
     MYSQL_DB = 'ANUNCIAUFC'
 
 

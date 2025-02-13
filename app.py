@@ -2,6 +2,7 @@ from flask import Flask, json, render_template, request, jsonify, session
 from flask_mysqldb import MySQL
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
+from flask_session import Session
 from config import Config
 from database import Database
 from mail import MailService
@@ -12,12 +13,13 @@ import base64
 import jwt  
 import datetime
 import os
+import base64
 
 app = Flask (__name__)
 app.config.from_object(Config)
 
 app.config['MAIL_USERNAME'] = "anunciaufc@gmail.com"
-app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD', '')   # Use a senha gerada pelo Google
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD', '')  
 
 
 SECRET_KEY = os.urandom(24)
@@ -65,6 +67,7 @@ class USERS:
 def create_jwt_token(user):
     try:
         payload = { 
+                'email': user[1],
                 'name': user[3],          
                 'campus': user[6],      
                 'exp': datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
@@ -86,6 +89,10 @@ def verify_jwt_token(token):
     except jwt.InvalidTokenError:
         return None #token inválido
 
+def encode_image(image_data):
+    if image_data:
+        return base64.b64encode(image_data).decode('utf-8')
+    return None  # Retorna None se a imagem for None
 
 @app.route('/home', methods=['GET'])
 def home():
@@ -94,18 +101,20 @@ def home():
         announcements = db.query("SELECT * FROM ANNOUNCEMENT WHERE validation = 1 ORDER BY RAND() LIMIT %s", (quant,))
         
         return jsonify([
-        {
-            'id': announcement[0],
-            'description': announcement[7],
-            'campus': announcement[3],
-            'price': announcement[5],
-            'images': announcement[8], #por enquanto é null
-            'date': announcement[9]
-        } for announcement in announcements
+            {
+                'id': announcement[0],
+                'description': announcement[7],
+                'campus': announcement[3],
+                'price': announcement[5],
+                'images': [
+                    encode_image(announcement[8]),
+                ],
+                'date': announcement[13]
+            } for announcement in announcements
         ])
         
     except Exception as e:
-        return jsonify ({'error': str(e)}), 500
+        return jsonify({'error': str(e)}), 500
     
 
 @app.route('/products', methods = ['GET'])
@@ -155,8 +164,10 @@ def products():
             "price": p[5],
             "state": p[6],
             "description": p[7],
-            "images": p[8],
-            "date": p[9]
+            'images': [
+                encode_image(p[8]),
+            ],
+            "date": p[13]
         }
         for p in productsbd
     ]
@@ -286,36 +297,50 @@ def fargotpassword():
         print("Error:", e)
         return jsonify({'error': str(e)}), 500
     
-@app.route('/createannouncement', methods=['POST'])
+@app.route('/createannouncement', methods=['POST', 'OPTIONS'])
 def criar_anuncio():
-    if 'email' not in session:
-        return jsonify({'error': 'Usuário não autenticado'}), 401
+    if request.method == 'OPTIONS':
+        response = app.response_class()
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:5173')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.status_code = 200
+        return response
     
-    token = request.headers.get('Authorization')
-    
+    token = request.headers.get('Authorization').strip('"')
+
+    if not token:
+        response = jsonify({'error': 'Token não enviado'}), 401
+        return response
+
     payload = verify_jwt_token(token)
-        
+
+
     if not payload:
-        return jsonify({'error': 'Token expirado ou inválido'}), 404
-    
-    data = json.loads(request.form['data']) 
+        response = jsonify({'error': 'Token expirado ou inválido'}), 404
+        return response
+
+    email = payload.get('email') 
+    print(request.files.getlist("images"))
+    data = json.loads(request.form['data'])
     images = request.files.getlist("images")
-    
+
     if len(images) > 4:
-        return jsonify({'error': 'Máximo de 4 imagens permitidas'}), 400
+        response = jsonify({'error': 'Máximo de 4 imagens permitidas'}), 400
+        return response
     
     image_bytes = [img.read() for img in images] + [None] * (4 - len(images))
     
     title = data['title']
     category = data['category']
     campus = data['campus']
-    value = data['value']
-    stateProduct = data['stateProduct']
+    value = data['price']
+    stateProduct = data['state']
     description = data['description']
     validation = 1 #Quando a parte do adm estiver implementado deve inicializar em 0
     
     try:
-        email = session['email']
         
         idUser = db.query('SELECT * FROM USERS WHERE email = %s', (email,))[0][0]
         
@@ -336,27 +361,25 @@ def criar_anuncio():
 def get_announcement():
     
     id = request.args.get('id')
+    print(id)
     
     try:
-        query = "SELECT title, category, campus, price, state, description, image1, image2, image3, image4 FROM ANNOUNCEMENT WHERE id = %s"
-        anuncio = db.query(query, (id,))
+        query = "SELECT * FROM ANNOUNCEMENT WHERE id = %s"
+        anuncio = db.query(query, (id,))[0]
 
         if not anuncio:
             return jsonify({'error': 'Anúncio não encontrado'}), 404
 
-        # Converter imagens binárias para base64 para facilitar a exibição no front-end
-        def convert_image(image_data):
-            return None if image_data is None else f"data:image/jpeg;base64,{image_data.hex()}"
-
-        images = [convert_image(anuncio[f'image{i}']) for i in range(1, 5)]
+        images = [encode_image(anuncio[i]) for i in range(8, 11)]
         
         return jsonify({
-            'title': anuncio['title'],
-            'category': anuncio['category'],
-            'campus': anuncio['campus'],
-            'price': anuncio['price'],
-            'state': anuncio['state'],
-            'description': anuncio['description'],
+            'title': anuncio[2],
+            'category': anuncio[4],
+            'campus': anuncio[3],
+            'price': anuncio[5],
+            'state': anuncio[6],
+            'description': anuncio[7],
+            'date': anuncio[13],
             'images': images
         })
 
