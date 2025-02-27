@@ -552,8 +552,9 @@ def meus_anuncios():
                 "title": a[2],
                 "campus": a[3],
                 "price": a[5],
+                "description": a[7],
                 "date": a[9],
-                "first_image": encode_image(a[10]) if a[10] else None  
+                "image": encode_image(a[10]) if a[10] else None  
             }
             for a in result
         ]
@@ -575,7 +576,7 @@ def atualizar_anuncio():
 
     try:
         data = json.loads(request.form['data'])
-        email = get_email_from_jwt(token)
+        email = payload['email']
         announcementId = data.get('announcementId')
 
         result = db.query("""
