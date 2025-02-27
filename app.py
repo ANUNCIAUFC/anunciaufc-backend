@@ -528,7 +528,7 @@ def meus_anuncios():
         return jsonify({'error': 'Token expirado ou inválido'}), 404
     
     try:
-        email = get_email_from_jwt(token)
+        email = payload['email']
         result = db.query("""
             SELECT a.*, 
                 (SELECT i.image 
