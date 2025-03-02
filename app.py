@@ -1,14 +1,10 @@
-from flask import Flask, json, render_template, request, jsonify, session
-from flask_mysqldb import MySQL
+from flask import Flask, json, request, jsonify
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
-from flask_session import Session
 from config import Config
 from database import Database
 from mail import MailService
-from abc import ABC, abstractmethod
 import random
-import mysql.connector
 import base64
 import jwt  
 import datetime
@@ -64,15 +60,13 @@ class USERS:
         self.campus = campus
         self.gender = gender
         
-def create_jwt_token(user):
+def create_jwt_token(user, tipo):
     try:
         payload = { 
-                'email': user[1],
-                'name': user[3],          
-                'campus': user[6],      
-                'exp': datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
+                'tipo': tipo,
+                'email': user[1],     
+                'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2)
             }
-            
         token = jwt.encode(payload, JWT_SECRET_KEY, algorithm='HS256')
 
         return token
@@ -101,9 +95,9 @@ def home():
         query = """
             SELECT a.id, a.description, a.campus, a.price, a.date, 
                 COALESCE(i.image, '') AS image
-            FROM ANNOUNCEMENT a
-            LEFT JOIN IMAGE i ON i.announcementId = a.id 
-                    AND i.id = (SELECT MIN(id) FROM IMAGE WHERE announcementId = a.id)
+            FROM ANNOUNCEMENTS a
+            LEFT JOIN IMAGES i ON i.announcementId = a.id 
+                    AND i.id = (SELECT MIN(id) FROM IMAGES WHERE announcementId = a.id)
             WHERE a.validation = 1
             ORDER BY RAND()
             LIMIT %s
@@ -140,12 +134,12 @@ def products():
 
         query = """
             SELECT 
-                a.id, a.userId, a.title, a.campus, a.category, 
+                a.id, a.customerId, a.title, a.campus, a.category, 
                 a.price, a.state, a.description, a.date, 
                 i.image 
-            FROM ANNOUNCEMENT a
-            LEFT JOIN IMAGE i ON a.id = i.announcementId
-            WHERE 1=1
+            FROM ANNOUNCEMENTS a
+            LEFT JOIN IMAGES i ON a.id = i.announcementId
+            WHERE a.validation = 1
         """
         params = []
 
@@ -224,9 +218,16 @@ def cadastro():
             return jsonify({'message': "E-mail existente, digite outro!", 'code': "EMAIL_ALREADY_EXISTS"}), 409
 
         db.execute("""
-            INSERT INTO USERS (name, password, telephone, email, cpf, campus, gender) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (name, password, telephone, email, cpf, campus, gender))
+            INSERT INTO USERS (name, password, email) 
+            VALUES (%s, %s, %s)
+        """, (name, password, email,))
+
+        userId = db.query("SELECT id FROM USERS WHERE email = %s", (email,))
+        
+        db.execute("""
+            INSERT INTO CUSTOMERS (userId, telephone, cpf, campus, gender)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (userId, telephone, cpf, campus, gender,))
 
         return jsonify({'message': 'Registrado com sucesso'}), 200
 
@@ -269,15 +270,32 @@ def get_user():
         token = request.headers.get('Authorization').strip('"')
         payload = verify_jwt_token(token)
         if not payload:
-            return jsonify({'error': 'Token expirado ou inválido'}), 404
+            return jsonify({'error': 'Token expirado ou inválido'}), 401
+        
+        if payload.get('tipo') == 'admin':
+            return jsonify({'error': 'Usuário não autorizado para esta requisição'}), 403
         
         email = payload['email']
         
-        user = db.query("SELECT name, telephone, email, cpf, campus, gender FROM USERS WHERE email = %s", (email,))[0]
+        user = db.query("""
+                            SELECT 
+                                u.name, 
+                                u.email, 
+                                c.telephone, 
+                                c.cpf, 
+                                c.campus, 
+                                c.gender 
+                            FROM USERS u
+                            JOIN CUSTOMERS c ON u.id = c.userId
+                            WHERE u.email = %s
+                        """, (email,))[0]
+        
+        print(user)
+
         
         return jsonify({'name': user[0],
-                        'telephone': user[1],
-                        'email': user[2],
+                        'telephone': user[2],
+                        'email': user[1],
                         'cpf': user[3],
                         'campus': user[4],
                         'gender': user[5]}), 200 
@@ -292,27 +310,48 @@ def update_user():
         token = request.headers.get('Authorization').strip('"')
         payload = verify_jwt_token(token)
         if not payload:
-            return jsonify({'error': 'Token expirado ou inválido'}), 404
+            return jsonify({'error': 'Token expirado ou inválido'}), 401
+        
+        if payload.get('tipo') == 'admin':
+            return jsonify({'error': 'Usuário não autorizado para esta requisição'}), 403
         
         email = payload['email'] 
          
         data = request.get_json()
-        user = db.query("SELECT name, telephone, email, cpf, campus, gender FROM USERS WHERE email = %s", (email,))[0]
+        user = db.query("""
+                            SELECT 
+                                u.id,
+                                u.name, 
+                                c.telephone, 
+                                c.campus, 
+                                c.gender 
+                            FROM USERS u 
+                            JOIN CUSTOMERS c
+                                ON u.id = c.userId 
+                            WHERE u.email = %s
+                        """, (email,))[0]
+
         
-        name = data.get('name', user[0])
-        telephone = data.get('telephone', user[1])
-        campus = data.get('campus', user[4])
-        gender = data.get('gender', user[5])
+        name = data.get('name', user[1])
+        telephone = data.get('telephone', user[2])
+        campus = data.get('campus', user[3])
+        gender = data.get('gender', user[4])
         
         db.execute("""
             UPDATE USERS
-            SET name = %s, telephone = %s, campus = %s, gender = %s
+            SET name = %s
             WHERE email = %s
-        """, (name, telephone, campus, gender, email))
+        """, (name, email))
+        
+        db.execute("""
+            UPDATE CUSTOMERS
+            SET telephone = %s, campus = %s, gender = %s
+            WHERE userId = %s
+        """, (telephone, campus, gender, user[0]))
         
         user_update = db.query("SELECT * FROM USERS WHERE email = %s", (email,))[0]
         
-        token_update = create_jwt_token(user_update)
+        token_update = create_jwt_token(user_update, 'customer')
         
         return jsonify({'message': 'Dados atualizados com sucesso!',
                         'token': token_update}), 200 
@@ -328,7 +367,7 @@ def delete_user():
     payload = verify_jwt_token(token)
      
     if not payload:
-        return jsonify({'error': 'Token expirado ou inválido'}), 404
+        return jsonify({'error': 'Token expirado ou inválido'}), 401
     
     try:
         email = payload['email']
@@ -348,6 +387,7 @@ def login():
         email = data.get('email')
         password = data.get('password')
 
+
         if not email or not password:
             return jsonify({'message': 'Email e senha são obrigatórios'}), 400
 
@@ -358,14 +398,23 @@ def login():
         if not bcrypt.check_password_hash(user[2], password):
             return jsonify({'message': 'Senha inválida'}), 401
         
-        token = create_jwt_token(user)
+        admin = db.query('SELECT * FROM ADMINISTRATORS WHERE userId = %s', (user[0],))
+        
+        if admin:
+            token = create_jwt_token(user, 'admin')
+            return jsonify({'message': 'Login realizado com sucesso do administrador',
+                            'type': 'admin',
+                            'token': token}), 200
+        
+        
+        token = create_jwt_token(user, 'customer')
         
         if token is None:
             return jsonify({'error': 'Erro ao criar o token JWT'}), 500
         
-        session['email'] = email
 
         return jsonify({'message': 'Login realizado com sucesso',
+                        'type': 'customer',
                         'token': token,
                         'email': email}), 200
 
@@ -382,7 +431,7 @@ def logout():
     payload = verify_jwt_token(token)
     
     if not payload:
-        return jsonify({'error': 'Token expirado ou inválido'}), 404
+        return jsonify({'error': 'Token expirado ou inválido'}), 401
     
     return jsonify({'message': 'Logout realizado com sucesso!'}), 200
 
@@ -428,8 +477,11 @@ def criar_anuncio():
 
 
     if not payload:
-        response = jsonify({'error': 'Token expirado ou inválido'}), 404
+        response = jsonify({'error': 'Token expirado ou inválido'}), 401
         return response
+    
+    if payload.get('tipo') == 'admin':
+        return jsonify({'error': 'Usuário não autorizado para esta requisição'}), 403
 
     email = payload.get('email') 
     print(request.files.getlist("images"))
@@ -448,28 +500,30 @@ def criar_anuncio():
     value = data['price']
     stateProduct = data['state']
     description = data['description']
-    validation = 1 #Quando a parte do adm estiver implementado deve inicializar em 0
+    validation = 0
     
     try:
         
-        idUser = db.query('SELECT * FROM USERS WHERE email = %s', (email,))[0][0]
-        
+        # Buscar o 'customerId' em 'CUSTOMERS' usando o 'userId' de 'USERS'
+        customer = db.query('SELECT id FROM CUSTOMERS WHERE userId = (SELECT id FROM USERS WHERE email = %s)', (email,))
+        if not customer:
+            return jsonify({'error': 'Usuário não cadastrado como cliente'}), 400
+        customerId = customer[0][0]  # Obter o 'customerId' da consulta
+
         db.execute(''' 
-            INSERT INTO ANNOUNCEMENT(userId, title, category, campus, price, state, description, validation)
+            INSERT INTO ANNOUNCEMENTS(customerId, title, category, campus, price, state, description, validation)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (idUser, title, category, campus, value, stateProduct, description, validation))
-        
+        ''', (customerId, title, category, campus, value, stateProduct, description, validation))
+
         idAnnouncement = db.query('SELECT LAST_INSERT_ID()')[0][0]
 
         for i, img in enumerate(image_bytes):
-            print("entrou no for")
-            if img:  
-                print("entrou no if")
+            if img:
                 db.execute('''
-                    INSERT INTO IMAGE(announcementId, image)
+                    INSERT INTO IMAGES(announcementId, image)
                     VALUES (%s, %s)
                 ''', (idAnnouncement, img))
-        
+
         return jsonify({'message': 'Anúncio criado com sucesso!'}), 200
     
     except Exception as e:
@@ -484,7 +538,7 @@ def get_announcement():
     
     try:
         # Obtendo o anúncio da tabela ANNOUNCEMENT
-        query = "SELECT * FROM ANNOUNCEMENT WHERE id = %s"
+        query = "SELECT * FROM ANNOUNCEMENTS WHERE id = %s"
         anuncio = db.query(query, (id,))
         
         if not anuncio:
@@ -493,10 +547,10 @@ def get_announcement():
         anuncio = anuncio[0] 
 
         
-        query_images = "SELECT image FROM IMAGE WHERE announcementId = %s"
+        query_images = "SELECT image FROM IMAGES WHERE announcementId = %s"
         images_data = db.query(query_images, (id,))
 
-        query_user = "SELECT telephone FROM USERS WHERE id = %s"
+        query_user = "SELECT telephone FROM CUSTOMERS WHERE id = %s"
         user_telephone = db.query(query_user, (anuncio[1],))[0][0]
 
         
@@ -525,19 +579,24 @@ def meus_anuncios():
     payload = verify_jwt_token(token)
     
     if not payload:
-        return jsonify({'error': 'Token expirado ou inválido'}), 404
+        return jsonify({'error': 'Token expirado ou inválido'}), 401
+    
+    if payload.get('tipo') == 'admin':
+        return jsonify({'error': 'Usuário não autorizado para esta requisição'}), 403
     
     try:
         email = payload['email']
-        result = db.query("""
+        result = db.query(""" 
             SELECT a.*, 
                 (SELECT i.image 
-                 FROM IMAGE i 
-                 WHERE i.announcementId = a.id 
-                 ORDER BY i.id ASC 
-                 LIMIT 1) AS first_image
-            FROM ANNOUNCEMENT a
-            WHERE a.userId = (SELECT id FROM USERS WHERE email = %s)
+                    FROM IMAGES i 
+                    WHERE i.announcementId = a.id 
+                    ORDER BY i.id ASC 
+                    LIMIT 1) AS first_image
+            FROM ANNOUNCEMENTS a
+            JOIN CUSTOMERS c ON a.customerId = c.id
+            JOIN USERS u ON c.userId = u.id
+            WHERE u.email = %s
         """, (email,))
         
         print(result[0])
@@ -572,8 +631,11 @@ def atualizar_anuncio():
     payload = verify_jwt_token(token)
 
     if not payload:
-        return jsonify({'error': 'Token expirado ou inválido'}), 404
+        return jsonify({'error': 'Token expirado ou inválido'}), 401
 
+    if payload.get('tipo') == 'admin':
+        return jsonify({'error': 'Usuário não autorizado para esta requisição'}), 403
+    
     try:
         data = json.loads(request.form['data'])
         email = payload['email']
@@ -581,8 +643,9 @@ def atualizar_anuncio():
 
         result = db.query("""
                             SELECT a.*
-                            FROM ANNOUNCEMENT a
-                            JOIN USERS u ON a.userId = u.id
+                            FROM ANNOUNCEMENTS a
+                            JOIN CUSTOMERS c ON a.customerId = c.id
+                            JOIN USERS u ON c.userId = u.id
                             WHERE a.id = %s AND u.email = %s
                             """, (announcementId, email))
 
@@ -599,10 +662,10 @@ def atualizar_anuncio():
         price = data.get('price', result[5])
         state = data.get('state', result[6])
         description = data.get('description', result[8])
-        validation = 1 #tem que mudar para 0
+        validation = 0 
 
         db.execute('''
-            UPDATE ANNOUNCEMENT
+            UPDATE ANNOUNCEMENTS
             SET title = %s, category = %s, campus = %s, price = %s, state = %s, 
                 description = %s, validation = %s
             WHERE id = %s
@@ -614,11 +677,11 @@ def atualizar_anuncio():
             if len(images) > 4:
                 return jsonify({'error': 'Máximo de 4 imagens permitidas'}), 400
 
-            db.execute("DELETE FROM IMAGE WHERE announcementId = %s", (announcementId,))
+            db.execute("DELETE FROM IMAGES WHERE announcementId = %s", (announcementId,))
 
             for image in images:
                 image_data = image.read()
-                db.execute("INSERT INTO IMAGE (announcementId, image) VALUES (%s, %s)", (announcementId, image_data))
+                db.execute("INSERT INTO IMAGES (announcementId, image) VALUES (%s, %s)", (announcementId, image_data))
 
         return jsonify({'message': 'Anúncio atualizado com sucesso!'}), 200
 
@@ -631,41 +694,114 @@ def deletar_anuncio():
     payload = verify_jwt_token(token)
     
     if not payload:
-        return jsonify({'error': 'Token expirado ou inválido'}), 404
+        return jsonify({'error': 'Token expirado ou inválido'}), 401
+    
+    if payload.get('tipo') == 'admin':
+        return jsonify({'error': 'Usuário não autorizado para esta requisição'}), 403
+    
     try:
         data = request.get_json()
         email = payload['email']
-        announcementId = data['announcementId']
+        announcementId = data.get('announcementId')
         
         result = db.query("""
-                            SELECT a.*
-                            FROM ANNOUNCEMENT a
-                            JOIN USERS u ON a.userId = u.id
-                            WHERE a.id = %s AND u.email = %s
-                            """, (announcementId, email))
+            SELECT a.*
+                FROM ANNOUNCEMENTS a
+                JOIN CUSTOMERS c ON a.customerId = c.id
+                JOIN USERS u ON c.userId = u.id
+            WHERE a.id = %s AND u.email = %s
+            """, (announcementId, email))
         
         if not result:
             return jsonify({'error': 'Anúncio não encontrado ou você não tem permissão para deletá-lo'}), 403
         
-        db.execute('DELETE FROM ANNOUNCEMENT WHERE id = %s', (announcementId))
+        db.execute('DELETE FROM ANNOUNCEMENTS WHERE id = %s', (announcementId,))
         
         return jsonify({'message': 'Anúncio deletado com sucesso!'}), 200
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    
 
 
-@app.route('/verify_token', methods=['GET'])
-def verificar_token():
+@app.route('/get_announcement_no_verify', methods=['GET'])
+def anuncios_nao_verificado():
     token = request.headers.get('Authorization').strip('"')
     payload = verify_jwt_token(token)
-    
+
     if not payload:
         return jsonify({'error': 'Token expirado ou inválido'}), 401
-    
-    return jsonify({'message': 'Token válido'}), 200
 
+    if payload.get('tipo') == 'customer':
+        return jsonify({'error': 'Usuário não autorizado para esta requisição'}), 403
+
+    try:
+        query = """
+            SELECT a.id, a.customerId, a.date, u.email, u.name
+            FROM ANNOUNCEMENTS a
+            JOIN CUSTOMERS c ON a.customerId = c.id
+            JOIN USERS u ON c.userId = u.id
+            WHERE a.validation = %s
+        """
+        
+        announcements = db.query(query, (0,))
+
+        if not announcements:
+            return jsonify([]), 200
+
+        result = [
+            {
+                'id': announcement[0],           
+                'customer_id': announcement[1],  
+                'created_at': announcement[2],   
+                'email': announcement[3],       
+                'name': announcement[4]         
+            }
+            for announcement in announcements
+        ]
+    
+        return jsonify(result), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/verify_annoucement', methods=['PUT'])
+def anuncios_verificados():
+    data = request.get_json()
+    print(data)
+    token = request.headers.get('Authorization').strip('"')
+    payload = verify_jwt_token(token)
+    print(payload)
+
+    id = data['id']
+    status = data['status']
+    email = data['email']
+
+    if payload.get('tipo') == 'customer':
+        return jsonify({'error': 'Usuário não autorizado para esta requisição'}), 403
+    
+    if status == 'accept':
+        db.execute('UPDATE ANNOUNCEMENTS SET validation = %s WHERE id = %s', (1, id,))
+        mail.send_accept_mail(email)
+        return jsonify({'message':'Anuncio aceito com sucesso!'})
+    
+    if status == 'refused':
+        db.execute('DELETE FROM ANNOUNCEMENTS WHERE id = %s', (id,))
+        mail.send_refused_mail(email)
+        return jsonify({'message':'Anuncio deletado com sucesso!'})
+    
+@app.route("/verify_type", methods=['GET'])
+def verify_type():
+    token = request.headers.get('Authorization').strip('"')
+    payload = verify_jwt_token(token)
+
+    if payload.get('tipo') == 'customer':
+        return jsonify({'type':'customer'}), 200
+    else:
+        return jsonify({'type':'admin'}), 200
+
+    
+    
 if __name__ == '__main__':
     app.run(debug=True)
 
